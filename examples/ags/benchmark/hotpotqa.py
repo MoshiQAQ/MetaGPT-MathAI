@@ -64,8 +64,8 @@ async def load_data(file_path: str, samples=20, total_length=1250, test=False) -
     async with aiofiles.open(file_path, mode="r") as file:
         async for line in file:
             data.append(json.loads(line))
-    data = data[:total_length] 
-    random_indices = generate_random_indices(len(data), samples, test)
+    random_indices = generate_random_indices(len(data), total_length, False) # get random indices of 1250
+    random_indices = random_indices[:samples] if not test else random_indices[samples:] # get n_samples for validation or test
     data = [data[i] for i in random_indices]
     return data
 
