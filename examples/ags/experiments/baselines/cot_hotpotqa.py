@@ -9,29 +9,37 @@ from pydantic import BaseModel, Field
 from typing import Tuple
 
 HOTPOTQA_PROMPT = """
-问题: {question}
-
-上下文:
-{context}
-
-请一步步思考,并在最后给出你的答案和支持性句子。使用XML标签包裹内容。
+Solve a question answering task by having a Thought, then finish with your answer. Thought can reason about the current situation. Return the answer in few words. You will be given context that you should use to help you answer the question.
+Relevant Context: {context} 
+Question: {question}
+Thought: {thought}
 """
 
 class GenerateOp(BaseModel):
-    answer: str = Field(default="", description="问题的答案")
+    solution: str = Field(default="", description="The thought or answer to the question")
 
 class CoTGenerate(Operator):
     def __init__(self, llm: LLM, name: str = "Generate"):
         super().__init__(name, llm)
 
     async def __call__(self, question: str, context: str, mode: str = None) -> Tuple[str, str]:
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context)
+        thought = ""
+        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
         fill_kwargs = {"context": prompt, "llm": self.llm}
         if mode:
             fill_kwargs["mode"] = mode
         node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
         response = node.instruct_content.model_dump()
-        return response["answer"]
+
+        thought = response["solution"]
+
+        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
+        fill_kwargs = {"context": prompt, "llm": self.llm}
+        if mode:
+            fill_kwargs["mode"] = mode
+        node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
+        response = node.instruct_content.model_dump()
+        return response["solution"]
 
 class CoTSolveGraph(SolveGraph):
     def __init__(self, name: str, llm_config, dataset: str):
@@ -48,9 +56,9 @@ if __name__ == "__main__":
         # llm_config = ModelsConfig.default().get("gpt-35-turbo-1106")
         graph = CoTSolveGraph(name="CoT", llm_config=llm_config, dataset="HotpotQA")
         file_path = "examples/ags/data/hotpotqa.jsonl"
-        samples = 50 # TODO 选择前1000条跑实验
+        samples = 250 # 250 for validation, 1000 for test
         path = "examples/ags/data/baselines/general/hotpotqa"
-        score = await hotpotqa_evaluation(graph, file_path, samples, path)
+        score = await hotpotqa_evaluation(graph, file_path, samples, path, test=True)
         return score
 
     import asyncio 

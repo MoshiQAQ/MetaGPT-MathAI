@@ -59,7 +59,7 @@ def f1_score(prediction, ground_truth):
     return f1
 
 
-async def load_data(file_path: str, samples=20, total_length=1000, test=False) -> List[dict]:
+async def load_data(file_path: str, samples=20, total_length=1250, test=False) -> List[dict]:
     data = []
     async with aiofiles.open(file_path, mode="r") as file:
         async for line in file:
