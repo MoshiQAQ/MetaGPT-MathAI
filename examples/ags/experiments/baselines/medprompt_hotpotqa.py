@@ -12,14 +12,16 @@ from collections import Counter
 import random
 
 HOTPOTQA_PROMPT = """
-Solve a question answering task by having a Thought, then finish with your answer. Thought can reason about the current situation. Return the answer in few words. You will be given context that you should use to help you answer the question.
-Relevant Context: {context} 
+Think step by step and solve the problem.
+1. In the "thought" field, explain your thinking process in detail.
+2. In the "answer" field, provide the final answer concisely and clearly. The answer should be a direct response to the question, without including explanations or reasoning.
 Question: {question}
-Thought: {thought}
+The revelant context: {context}
 """
 
 class GenerateOp(BaseModel):
-    solution: str = Field(default="", description="The thought or answer to the problem")
+    thought: str = Field(default="", description="The step by step thinking process")
+    answer: str = Field(default="", description="The final answer to the question")
 
 class CoTGenerate(Operator):
     def __init__(self, llm: LLM, name: str = "Generate"):
@@ -27,37 +29,24 @@ class CoTGenerate(Operator):
 
     async def __call__(self, question: str, context: str, mode: str = None) -> Tuple[str, str]:
         thought = ""
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
+        prompt = HOTPOTQA_PROMPT.format(question=question, context=context)
         fill_kwargs = {"context": prompt, "llm": self.llm}
         if mode:
             fill_kwargs["mode"] = mode
         node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
         response = node.instruct_content.model_dump()
 
-        thought = response["solution"]
-
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
-        fill_kwargs = {"context": prompt, "llm": self.llm}
-        if mode:
-            fill_kwargs["mode"] = mode
-        node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
-        response = node.instruct_content.model_dump()
-        return response["solution"]
+        return response["answer"]
 
 MD_ENSEMBLE_PROMPT = """
-You are given a problem:
-{question}
-The revelant context is provided as follows:
-{context}
-
-Here is a list of possible solutions to the problem:
+Given the question described as follows: {question}
+And the relevant context: {context}
+Several solutions have been generated to address the given question. They are as follows:
 {solutions}
 
-Using the inputs above, your goal is to choose the best solution to the problem.
-The main consideration is that the solution can fully solve the problem in a correct and robust manner.
-Provide your final decision by writing the chosen solution letter.
+Carefully evaluate these solutions and identify the solution that is more capable of solving the problem compared to other solutions, as this is crucial for problem-solving.
 
-Please follow the required format in your response.
+In the "thought" field, provide a detailed explanation of your thought process. In the "solution_letter" field, output only the single letter ID (A, B, C, etc.) corresponding to the solution. Do not include any additional text or explanation in the "solution_letter" field.
 """
 
 class MdEnsembleOp(BaseModel):
@@ -67,14 +56,13 @@ class MdEnsembleOp(BaseModel):
     )
     solution_letter: str = Field(default="", description="The letter of the chosen best solution (only one letter).")
 
-
 class MdEnsemble(Operator):
     """
     Paper: Can Generalist Foundation Models Outcompete Special-Purpose Tuning? Case Study in Medicine
     Link: https://arxiv.org/abs/2311.16452
     """
 
-    def __init__(self, name: str = "MdEnsemble", llm: LLM = LLM(), vote_count: int = 5):
+    def __init__(self, llm, name: str = "MdEnsemble", vote_count: int = 5):
         super().__init__(name, llm)
         self.vote_count = vote_count
 
@@ -103,7 +91,7 @@ class MdEnsemble(Operator):
             node = await ActionNode.from_pydantic(MdEnsembleOp).fill(**fill_kwargs)
             response = node.instruct_content.model_dump()
 
-            answer = response.get("solution_letter", "")
+            answer = response.get("solution_letter", "A")
             answer = answer.strip().upper()
 
             if answer in answer_mapping:
@@ -118,7 +106,7 @@ class MedPromptGraph(SolveGraph):
     def __init__(self, name: str, llm_config, dataset: str, vote_count: int = 5):
         super().__init__(name, llm_config, dataset)
         self.cot_generate = CoTGenerate(self.llm)
-        self.md_ensemble = MdEnsemble(self.llm, vote_count=vote_count)
+        self.md_ensemble = MdEnsemble(llm=self.llm, vote_count=vote_count)
 
     async def __call__(self, problem, context):
         solutions = []

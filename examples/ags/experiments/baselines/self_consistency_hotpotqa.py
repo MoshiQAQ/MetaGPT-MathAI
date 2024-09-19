@@ -12,14 +12,16 @@ from collections import Counter
 import random
 
 HOTPOTQA_PROMPT = """
-Solve a question answering task by having a Thought, then finish with your answer. Thought can reason about the current situation. Return the answer in few words. You will be given context that you should use to help you answer the question.
-Relevant Context: {context} 
+Think step by step and solve the problem.
+1. In the "thought" field, explain your thinking process in detail.
+2. In the "answer" field, provide the final answer concisely and clearly. The answer should be a direct response to the question, without including explanations or reasoning.
 Question: {question}
-Thought: {thought}
+The revelant context: {context}
 """
 
 class GenerateOp(BaseModel):
-    solution: str = Field(default="", description="The thought or answer to the problem")
+    thought: str = Field(default="", description="The step by step thinking process")
+    answer: str = Field(default="", description="The final answer to the question")
 
 class CoTGenerate(Operator):
     def __init__(self, llm: LLM, name: str = "Generate"):
@@ -27,37 +29,30 @@ class CoTGenerate(Operator):
 
     async def __call__(self, question: str, context: str, mode: str = None) -> Tuple[str, str]:
         thought = ""
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
+        prompt = HOTPOTQA_PROMPT.format(question=question, context=context)
         fill_kwargs = {"context": prompt, "llm": self.llm}
         if mode:
             fill_kwargs["mode"] = mode
         node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
         response = node.instruct_content.model_dump()
 
-        thought = response["solution"]
-
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
-        fill_kwargs = {"context": prompt, "llm": self.llm}
-        if mode:
-            fill_kwargs["mode"] = mode
-        node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
-        response = node.instruct_content.model_dump()
-        return response["solution"]
+        return response["answer"]
 
 SC_ENSEMBLE_PROMPT = """
-Given the question descripted as follows: {question}
-And the relevant context is provided as follows: {context}
-some solutions to the question are generated as follows:
+Given the question described as follows: {question}
+And the relevant context: {context}
+Several solutions have been generated to address the given question. They are as follows:
 {solutions}
 
-Evaluate these solutions and select the most consistent solution based on majority consensus.
-Give your answer with a single id of solution (without anything else).
+Carefully evaluate these solutions and identify the answer that appears most frequently across them. This consistency in answers is crucial for determining the most reliable solution.
+
+In the "thought" field, provide a detailed explanation of your thought process. In the "solution_letter" field, output only the single letter ID (A, B, C, etc.) corresponding to the most consistent solution. Do not include any additional text or explanation in the "solution_letter" field.
 """
 
 class ScEnsembleOp(BaseModel):
+    thought: str = Field(default="", description="The thought of the most consistent solution.")
     solution_letter: str = Field(default="", description="The letter of most consistent solution.")
-
-
+    
 class ScEnsemble(Operator):
     """
     Paper: Self-Consistency Improves Chain of Thought Reasoning in Language Models
@@ -66,7 +61,7 @@ class ScEnsemble(Operator):
     Link: https://arxiv.org/abs/2311.17311
     """
 
-    def __init__(self, name: str = "ScEnsemble", llm: LLM = LLM()):
+    def __init__(self, llm, name: str = "ScEnsemble"):
         super().__init__(name, llm)
 
     async def __call__(self, solutions: List[str], problem: str, context: str, mode: str = None):
@@ -83,7 +78,7 @@ class ScEnsemble(Operator):
         node = await ActionNode.from_pydantic(ScEnsembleOp).fill(**fill_kwargs)
         response = node.instruct_content.model_dump()
 
-        answer = response.get("solution_letter", "")
+        answer = response.get("solution_letter", "A")
         answer = answer.strip().upper()
 
         return {"solution": solutions[answer_mapping[answer]]}
@@ -93,7 +88,7 @@ class SelfConsistencyGraph(SolveGraph):
     def __init__(self, name: str, llm_config, dataset: str):
         super().__init__(name, llm_config, dataset)
         self.cot_generate = CoTGenerate(self.llm)
-        self.sc_ensemble = ScEnsemble(self.llm)
+        self.sc_ensemble = ScEnsemble(llm = self.llm)
 
     async def __call__(self, problem, context):
         solutions = []
@@ -112,8 +107,8 @@ if __name__ == "__main__":
         file_path = "examples/ags/data/hotpotqa.jsonl"
         samples = 1
         path = "examples/ags/data/baselines/general/hotpotqa"
-        score, cost = await hotpotqa_evaluation(graph, file_path, samples, path, test=False)
-        return score, cost
+        score = await hotpotqa_evaluation(graph, file_path, samples, path, test=False)
+        return score
 
     import asyncio
     asyncio.run(main())

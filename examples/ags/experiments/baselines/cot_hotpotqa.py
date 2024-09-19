@@ -9,14 +9,16 @@ from pydantic import BaseModel, Field
 from typing import Tuple
 
 HOTPOTQA_PROMPT = """
-Solve a question answering task by having a Thought, then finish with your answer. Thought can reason about the current situation. Return the answer in few words. You will be given context that you should use to help you answer the question.
-Relevant Context: {context} 
+Think step by step and solve the problem.
+1. In the "thought" field, explain your thinking process in detail.
+2. In the "answer" field, provide the final answer concisely and clearly. The answer should be a direct response to the question, without including explanations or reasoning.
 Question: {question}
-Thought: {thought}
+The revelant context: {context}
 """
 
 class GenerateOp(BaseModel):
-    solution: str = Field(default="", description="The thought or answer to the question")
+    thought: str = Field(default="", description="The step by step thinking process")
+    answer: str = Field(default="", description="The final answer to the question")
 
 class CoTGenerate(Operator):
     def __init__(self, llm: LLM, name: str = "Generate"):
@@ -24,22 +26,14 @@ class CoTGenerate(Operator):
 
     async def __call__(self, question: str, context: str, mode: str = None) -> Tuple[str, str]:
         thought = ""
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
+        prompt = HOTPOTQA_PROMPT.format(question=question, context=context)
         fill_kwargs = {"context": prompt, "llm": self.llm}
         if mode:
             fill_kwargs["mode"] = mode
         node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
         response = node.instruct_content.model_dump()
 
-        thought = response["solution"]
-
-        prompt = HOTPOTQA_PROMPT.format(question=question, context=context, thought=thought)
-        fill_kwargs = {"context": prompt, "llm": self.llm}
-        if mode:
-            fill_kwargs["mode"] = mode
-        node = await ActionNode.from_pydantic(GenerateOp).fill(**fill_kwargs)
-        response = node.instruct_content.model_dump()
-        return response["solution"]
+        return response["answer"]
 
 class CoTSolveGraph(SolveGraph):
     def __init__(self, name: str, llm_config, dataset: str):
@@ -52,13 +46,13 @@ class CoTSolveGraph(SolveGraph):
 
 if __name__ == "__main__":
     async def main():
-        llm_config = ModelsConfig.default().get("gpt-4o-mini")
+        llm_config = ModelsConfig.default().get("deepseek-chat")
         # llm_config = ModelsConfig.default().get("gpt-35-turbo-1106")
         graph = CoTSolveGraph(name="CoT", llm_config=llm_config, dataset="HotpotQA")
         file_path = "examples/ags/data/hotpotqa.jsonl"
         samples = 250 # 250 for validation, 1000 for test
         path = "examples/ags/data/baselines/general/hotpotqa"
-        score = await hotpotqa_evaluation(graph, file_path, samples, path, test=True)
+        score = await hotpotqa_evaluation(graph, file_path, samples, path, test=False)
         return score
 
     import asyncio 

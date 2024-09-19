@@ -73,11 +73,15 @@ async def evaluate_problem(input: str, context_str: str, graph: Callable, expect
     max_retries = 5
     retries = 0
 
+    # global cost
+    # prediction, cost = await graph(input, context_str) if graph else "None"
+    # score = f1_score(prediction["solution"], expected_output)
+
     while retries < max_retries:
         try:
             global cost
             prediction, cost = await graph(input, context_str) if graph else "None"
-            score = f1_score(prediction, expected_output)
+            score = f1_score(prediction["solution"], expected_output)
 
             break
         except Exception as e:
@@ -125,5 +129,6 @@ async def hotpotqa_evaluation(graph: Callable, file_path: str, samples: int, pat
     average_score = save_results_to_csv(results, path=path)
     print(f"Average score on HotpotQA dataset: {average_score:.5f}")
     global cost
-    print(f"Total cost: {cost}")
+    print(f"Total cost: {cost: .5f}")
+    print(f"Cost per sample: {(cost / len(data)):.9f}")
     return average_score
