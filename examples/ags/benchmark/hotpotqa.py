@@ -75,13 +75,13 @@ async def evaluate_problem(input: str, context_str: str, graph: Callable, expect
 
     # global cost
     # prediction, cost = await graph(input, context_str) if graph else "None"
-    # score = f1_score(prediction["solution"], expected_output)
+    # score = f1_score(prediction, expected_output)
 
     while retries < max_retries:
         try:
             global cost
             prediction, cost = await graph(input, context_str) if graph else "None"
-            score = f1_score(prediction["solution"], expected_output)
+            score = f1_score(prediction, expected_output)
 
             break
         except Exception as e:
